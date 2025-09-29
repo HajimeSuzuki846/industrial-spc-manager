@@ -84,33 +84,13 @@ export interface AlertCondition {
 
 export interface AlertAction {
   id: string;
-  type: 'mqtt' | 'email' | 'webhook';
+  type: 'email' | 'webhook';
   config: {
-    topic?: string;
-    message?: string;
     url?: string;
   };
 }
 
-export interface MQTTConfig {
-  broker: string;
-  port: number;
-  username?: string;
-  password?: string;
-  clientId: string;
-  // 証明書認証用の設定を追加
-  certificatePath?: string;
-  privateKeyPath?: string;
-  caPath?: string;
-  // 証明書の内容を直接保存（ブラウザ環境用）
-  certificateContent?: string;
-  privateKeyContent?: string;
-  caContent?: string;
-  // データベース関連のフィールド（オプション）
-  id?: number;
-  created_at?: string;
-  updated_at?: string;
-}
+// MQTT機能は削除済み
 
 export interface DragItem {
   id: string;

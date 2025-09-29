@@ -1071,52 +1071,7 @@ app.post('/api/auto-restart', async (req, res) => {
   }
 });
 
-// Thingsboard 設定保存
-app.post('/api/thingsboard/config', async (req, res) => {
-  try {
-    const config = req.body;
-    const savedConfig = await db.saveThingsboardConfig(config);
-    res.json({ success: true, config: savedConfig });
-  } catch (error) {
-    console.error('Error saving Thingsboard config:', error);
-    res.status(500).json({ error: 'Failed to save Thingsboard config' });
-  }
-});
-
-// Thingsboard 設定取得
-app.get('/api/thingsboard/config', async (req, res) => {
-  try {
-    const config = await db.getThingsboardConfig();
-    res.json(config);
-  } catch (error) {
-    console.error('Error getting Thingsboard config:', error);
-    res.status(500).json({ error: 'Failed to get Thingsboard config' });
-  }
-});
-
-// Thingsboard 接続テスト
-app.post('/api/thingsboard/test', async (req, res) => {
-  try {
-    const config = req.body;
-    const result = await db.testThingsboardConnection(config);
-    res.json(result);
-  } catch (error) {
-    console.error('Error testing Thingsboard connection:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Thingsboard デバイス取得
-app.post('/api/thingsboard/devices', async (req, res) => {
-  try {
-    const { config, pageSize = 20, page = 0 } = req.body;
-    const result = await db.getThingsboardDevices(config, pageSize, page);
-    res.json(result);
-  } catch (error) {
-    console.error('Error getting Thingsboard devices:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+// Thingsboard 関連は削除済み
 
 // InfluxDB 設定保存
 app.post('/api/influxdb/config', async (req, res) => {

@@ -1,69 +1,15 @@
 import React, { useState } from 'react';
-import { Settings, Database, Wifi, X, Shield, BarChart3 } from 'lucide-react';
-import { MQTTConfig } from './MQTTConfig';
+import { Settings, Database, X, Shield, BarChart3 } from 'lucide-react';
 import { PostgresConfig } from './PostgresConfig';
 import InfluxDBConfig from './InfluxDBConfig';
-import { MQTTConfig as MQTTConfigType } from '../types';
 
 interface AdminSettingsProps {
   onClose: () => void;
-  onConfigUpdate?: (config: MQTTConfigType) => void;
-  isConnected?: boolean;
-  connectionError?: string | null;
   onSystemStatusCheck?: () => void;
 }
 
-export const AdminSettings: React.FC<AdminSettingsProps> = ({ onClose, onConfigUpdate, isConnected = false, connectionError, onSystemStatusCheck }) => {
-  const [activeTab, setActiveTab] = useState<'mqtt' | 'postgres' | 'influxdb'>('mqtt');
-  const [mqttConfig, setMqttConfig] = useState<MQTTConfigType | null>(null);
-
-  // 保存されたMQTT設定を読み込む
-  const loadSavedMQTTConfig = async () => {
-    try {
-      const response = await fetch('/api/mqtt/config');
-      if (response.ok) {
-        const savedConfig = await response.json();
-        if (savedConfig) {
-          console.log('AdminSettings: Loaded saved MQTT config:', savedConfig);
-          
-          // データベース形式からフロントエンド形式に変換
-          const normalizedConfig: MQTTConfigType = {
-            broker: savedConfig.broker,
-            port: savedConfig.port,
-            clientId: savedConfig.client_id || savedConfig.clientId,
-            username: savedConfig.username || '',
-            password: savedConfig.password || '',
-            certificatePath: savedConfig.certificate_path || savedConfig.certificatePath || '',
-            privateKeyPath: savedConfig.private_key_path || savedConfig.privateKeyPath || '',
-            caPath: savedConfig.ca_path || savedConfig.caPath || '',
-            certificateContent: savedConfig.certificate_content || savedConfig.certificateContent || '',
-            privateKeyContent: savedConfig.private_key_content || savedConfig.privateKeyContent || '',
-            caContent: savedConfig.ca_content || savedConfig.caContent || ''
-          };
-          
-          setMqttConfig(normalizedConfig);
-          console.log('AdminSettings: Normalized config for MQTTConfig component:', normalizedConfig);
-        }
-      }
-    } catch (error) {
-      console.error('AdminSettings: Error loading saved MQTT config:', error);
-    }
-  };
-
-  // コンポーネントマウント時に保存された設定を読み込む
-  React.useEffect(() => {
-    loadSavedMQTTConfig();
-  }, []);
-
-  const handleMQTTConfigUpdate = (config: MQTTConfigType) => {
-    console.log('AdminSettings: Received config update from MQTTConfig:', config);
-    setMqttConfig(config);
-    // 親コンポーネントにも設定を通知
-    if (onConfigUpdate) {
-      console.log('AdminSettings: Notifying parent component of config update');
-      onConfigUpdate(config);
-    }
-  };
+export const AdminSettings: React.FC<AdminSettingsProps> = ({ onClose, onSystemStatusCheck }) => {
+  const [activeTab, setActiveTab] = useState<'postgres' | 'influxdb'>('postgres');
 
   // Thingsboard 設定は廃止済み
 
@@ -103,17 +49,6 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ onClose, onConfigU
         {/* Tab Navigation */}
         <div className="flex border-b border-gray-700">
           <button
-            onClick={() => setActiveTab('mqtt')}
-            className={`flex-1 flex items-center justify-center py-3 ${
-              activeTab === 'mqtt'
-                ? 'bg-blue-600 text-white'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
-            }`}
-          >
-            <Wifi size={16} className="mr-2" />
-            MQTT設定
-          </button>
-          <button
             onClick={() => setActiveTab('postgres')}
             className={`flex-1 flex items-center justify-center py-3 ${
               activeTab === 'postgres'
@@ -140,22 +75,7 @@ export const AdminSettings: React.FC<AdminSettingsProps> = ({ onClose, onConfigU
 
         {/* Content */}
         <div className="flex-1 p-6 overflow-y-auto">
-          {activeTab === 'mqtt' ? (
-            <div>
-              <div className="mb-4">
-                <h2 className="text-lg font-medium text-white mb-2">MQTT設定</h2>
-                <p className="text-gray-400 text-sm">
-                  MQTTブローカーとの接続設定を行います。通常のユーザーはこの設定を変更する必要はありません。
-                </p>
-              </div>
-              <MQTTConfig
-                config={mqttConfig}
-                isConnected={isConnected}
-                connectionError={connectionError}
-                onConfigUpdate={handleMQTTConfigUpdate}
-              />
-            </div>
-          ) : activeTab === 'postgres' ? (
+          {activeTab === 'postgres' ? (
             <div>
               <div className="mb-4">
                 <h2 className="text-lg font-medium text-white mb-2">データベース設定</h2>

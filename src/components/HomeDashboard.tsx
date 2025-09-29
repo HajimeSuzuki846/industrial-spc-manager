@@ -27,14 +27,12 @@ interface SystemStats {
 }
 
 interface HomeDashboardProps {
-  mqttConnected: boolean;
   databaseConnected: boolean;
   influxdbConnected: boolean;
   assets: Asset[];
 }
 
 export const HomeDashboard: React.FC<HomeDashboardProps> = ({
-  mqttConnected,
   databaseConnected,
   influxdbConnected,
   assets
@@ -230,21 +228,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
         </div>
 
-        {/* 接続ステータス */}
-        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-          <div className="flex items-center justify-between mb-4">
-            <div className={`${mqttConnected ? 'text-green-400' : 'text-red-400'}`}>
-              <Wifi size={20} />
-            </div>
-            <span className="text-sm text-gray-400">接続ステータス</span>
-          </div>
-          <div className="text-2xl font-bold text-white mb-1">
-            {mqttConnected ? '接続中' : '切断'}
-          </div>
-          <div className="text-sm text-gray-400">
-            MQTTデータベース
-          </div>
-        </div>
+        {/* 接続ステータスカードはMQTT廃止に伴い削除 */}
       </div>
 
       {/* アラート一覧 */}

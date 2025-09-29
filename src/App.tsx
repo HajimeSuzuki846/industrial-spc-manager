@@ -6,13 +6,12 @@ import { AdminSettings } from './components/AdminSettings';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { SystemStatusCheck } from './components/SystemStatusCheck';
 import { EditModeAuth } from './components/EditModeAuth';
-import { Factory, Asset, MQTTConfig as MQTTConfigType, ProductionLine } from './types';
+import { Factory, Asset, ProductionLine } from './types';
 import { mockFactories } from './data/mockData';
-import { useMQTT } from './hooks/useMQTT';
 import { useDatabaseStatus } from './hooks/useDatabaseStatus';
 import { useInfluxDBStatus } from './hooks/useInfluxDBStatus';
 import { useDataSync } from './hooks/useDataSync';
-import { Factory as FactoryIcon, Monitor, Shield, Edit3, Plus, Trash2, Home } from 'lucide-react';
+import { Factory as FactoryIcon, Monitor, Shield, Edit3, Home } from 'lucide-react';
 import { HomeDashboard } from './components/HomeDashboard';
 
 const App = memo(() => {
@@ -32,7 +31,7 @@ const App = memo(() => {
     const saved = localStorage.getItem('assetManager_showHome');
     return saved ? JSON.parse(saved) : true;
   });
-  const [mqttConfig, setMqttConfig] = useState<MQTTConfigType | null>(null);
+  
   const [showAdminAuth, setShowAdminAuth] = useState(false);
   const [showEditModeAuth, setShowEditModeAuth] = useState(false);
   
@@ -85,17 +84,11 @@ const App = memo(() => {
     saveProductionLine, 
     deleteProductionLine, 
     saveAssetToDB, 
-    deleteAsset,
-    isLoading: dataLoading,
-    error: dataError 
+    deleteAsset
   } = useDataSync();
 
   // 全アセットを取得する関数
-  const getAllAssets = (): Asset[][] => {
-    return factories.map(factory => 
-      factory.lines.flatMap(line => line.assets)
-    );
-  };
+  // getAllAssets は未使用のため削除
 
   // メモ化されたアセット更新ハンドラー
   const handleAssetUpdate = useCallback(async (updatedAsset: Asset) => {
@@ -132,16 +125,7 @@ const App = memo(() => {
     setShowHome(false);
   }, []);
 
-  // メモ化されたMQTT設定更新ハンドラー
-  const handleConfigUpdate = useCallback((newConfig: MQTTConfigType, isInitialLoad: boolean = false) => {
-    console.log('App: handleConfigUpdate called with:', newConfig);
-    setMqttConfig(newConfig);
-    
-    // 初期読み込みでない場合は、設定をlocalStorageに保存
-    if (!isInitialLoad) {
-      localStorage.setItem('mqttConfig', JSON.stringify(newConfig));
-    }
-  }, []);
+  // MQTT機能は削除
 
   // メモ化された管理者認証成功ハンドラー
   const handleAdminAuthSuccess = useCallback(() => {
@@ -410,13 +394,6 @@ const App = memo(() => {
   // データベース接続状態を取得
   const { isConnected: dbConnected, error: dbError } = useDatabaseStatus();
   
-  const { isConnected, messages, connectionError, disconnect, publish } = useMQTT({
-    config: mqttConfig,
-    factories: factories,
-    onAssetUpdate: handleAssetUpdate,
-    databaseConnected: dbConnected // データベース接続状態を渡す
-  });
-  
   // InfluxDB接続状態を取得
   const { isConnected: influxdbConnected, error: influxdbError } = useInfluxDBStatus();
   
@@ -437,19 +414,7 @@ const App = memo(() => {
     loadData();
   }, [loadFactories]);
 
-  // メモ化されたMQTT設定読み込み
-  useEffect(() => {
-    const savedConfig = localStorage.getItem('mqttConfig');
-    if (savedConfig) {
-      try {
-        const config = JSON.parse(savedConfig);
-        setMqttConfig(config);
-        handleConfigUpdate(config, true);
-      } catch (error) {
-        console.error('Failed to parse saved MQTT config:', error);
-      }
-    }
-  }, [handleConfigUpdate]);
+  // MQTT設定の読み込みは不要
 
   // メモ化された編集モード保存
   useEffect(() => {
@@ -510,13 +475,9 @@ const App = memo(() => {
       <AssetDetail
         key={selectedAsset.id}
         asset={selectedAsset}
-        onAssetUpdate={handleAssetUpdate}
-        mqttMessages={messages}
-        isEditMode={isEditMode}
-        publish={publish}
       />
     );
-  }, [selectedAsset, handleAssetUpdate, messages, isEditMode, publish]);
+  }, [selectedAsset, handleAssetUpdate, isEditMode]);
 
   // メモ化されたホームダッシュボードコンポーネント
   const homeDashboardComponent = useMemo(() => {
@@ -529,13 +490,12 @@ const App = memo(() => {
     
     return (
       <HomeDashboard
-        mqttConnected={isConnected}
         databaseConnected={dbConnected}
         influxdbConnected={influxdbConnected}
         assets={allAssets}
       />
     );
-  }, [showHome, isConnected, dbConnected, influxdbConnected, factories]);
+  }, [showHome, dbConnected, influxdbConnected, factories]);
 
   // メモ化されたアセットツリーコンポーネント
   const assetTreeComponent = useMemo(() => {
@@ -576,15 +536,13 @@ const App = memo(() => {
   const connectionStatusComponent = useMemo(() => {
     return (
       <ConnectionStatus
-        mqttConnected={isConnected}
-        mqttError={connectionError}
         databaseConnected={dbConnected}
         databaseError={dbError}
         influxdbConnected={influxdbConnected}
         influxdbError={influxdbError}
       />
     );
-  }, [isConnected, connectionError, dbConnected, dbError, influxdbConnected, influxdbError]);
+  }, [dbConnected, dbError, influxdbConnected, influxdbError]);
 
   // メモ化された管理者認証モーダル
   const adminAuthModal = useMemo(() => {
@@ -605,16 +563,13 @@ const App = memo(() => {
     return (
       <AdminSettings 
         onClose={handleAdminSettingsClose}
-        onConfigUpdate={handleConfigUpdate}
-        isConnected={isConnected}
-        connectionError={connectionError}
         onSystemStatusCheck={() => {
           // ページ再読み込みせずに SystemStatusCheck を再評価する
           setStatusCheckNonce((n) => n + 1);
         }}
       />
     );
-  }, [showAdminSettings, handleAdminSettingsClose, handleConfigUpdate, isConnected, connectionError]);
+  }, [showAdminSettings, handleAdminSettingsClose]);
 
     // SystemStatusCheck の再評価用のキー
     const [statusCheckNonce, setStatusCheckNonce] = useState(0);
