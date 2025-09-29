@@ -1,0 +1,647 @@
+﻿import { Asset, AlertRule, AlertCondition, AlertAction } from '../types';
+import { ZScoreCalculator, InfluxDBDataPoint } from './zscoreCalculator';
+import { evaluateNotebookCondition } from './notebookApi';
+
+export interface Alert {
+  id: string;
+  assetId: string;
+  assetName: string;
+  ruleId: string;
+  ruleName: string;
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+  timestamp: string;
+  isActive: boolean;
+  value?: number;
+  threshold?: number;
+  zscore?: number;
+  zscoreDetails?: {
+    currentValue: number;
+    populationMean: number;
+    populationStdDev: number;
+    threshold: number;
+  }
+
+  // 最終実行日時を取得
+    return this.lastExecutionTimes.get(ruleId) || null;
+  };
+  notebookPath?: string; // Notebook螳溯｡後ヱ繧ｹ
+  notebookUrl?: string; // Notebook繧帝幕縺上◆繧√・URL
+}
+
+export class AlertEvaluator {
+  private activeAlerts: Map<string, Alert> = new Map();
+  private alertRules: Map<string, AlertRule> = new Map();
+  private assets: Asset[] = []; // 繧｢繧ｻ繝・ヨ繝・・繧ｿ繧剃ｿ晄戟
+  private lastExecutionTimes: Map<string, Date> = new Map(); // 繝ｫ繝ｼ繝ｫ縺斐→縺ｮ譛邨ょｮ溯｡梧律譎・  private ruleIntervals: Map<string, NodeJS.Timeout> = new Map(); // 繝ｫ繝ｼ繝ｫ縺斐→縺ｮ螳壽悄螳溯｡後ち繧､繝槭・
+
+  constructor() {
+  }
+
+  // ルールの最終実行日時を取得
+  getLastExecutionTime(ruleId: string): Date | null {
+    return this.lastExecutionTimes.get(ruleId) || null;
+  }
+
+    // 螳壽悄逧・↓繧｢繝ｩ繝ｼ繝医・迥ｶ諷九ｒ繝√ぉ繝・け・・蛻・＃縺ｨ・・    setInterval(() => {
+      this.checkAlertTimeouts();
+    }
+
+  }
+
+
+  // 繧｢繧ｻ繝・ヨ繝・・繧ｿ繧定ｨｭ螳・  setAssets(assets: Asset[]) {
+    this.assets = assets;
+  }
+
+
+  // 繧｢繝ｩ繝ｼ繝医Ν繝ｼ繝ｫ繧定ｨｭ螳・  setAlertRules(rules: AlertRule[]) {
+    // 譌｢蟄倥・繧ｿ繧､繝槭・繧偵け繝ｪ繧｢
+    this.clearAllRuleIntervals();
+    
+    this.alertRules.clear();
+    rules.forEach(rule => {
+      this.alertRules.set(rule.id, rule);
+      // 繧｢繧ｯ繝・ぅ繝悶↑繝ｫ繝ｼ繝ｫ縺ｮ螳壽悄螳溯｡後ｒ髢句ｧ・      if (rule.isActive) {
+        this.startRuleInterval(rule);
+      }
+
+    }
+
+  }
+
+
+  // MQTT繝｡繝・そ繝ｼ繧ｸ繧定ｩ穂ｾ｡縺励※繧｢繝ｩ繝ｼ繝医ｒ逕滓・
+  async evaluateMessage(topic: string, message: string, timestamp: Date): Promise<Alert[]> {
+    const newAlerts: Alert[] = [];
+    
+    try {
+      // MQTT繝｡繝・そ繝ｼ繧ｸ繧偵ヱ繝ｼ繧ｹ
+      const data = this.parseMessage(message);
+      if (!data) return newAlerts;
+
+      // 繝医ヴ繝・け縺ｫ蟇ｾ蠢懊☆繧九い繧ｻ繝・ヨ繧堤音螳・      const asset = this.findAssetByTopic(topic);
+      if (!asset) {
+        console.log(`No asset found for topic: ${topic}`);
+        return newAlerts;
+      }
+
+
+      // 繧｢繧ｻ繝・ヨ繧ｹ繝・・繧ｿ繧ｹ繧弛nline縺ｫ譖ｴ譁ｰ
+      this.updateAssetStatus(asset.id, 'online', timestamp);
+
+      // 繧｢繧ｻ繝・ヨ縺ｫ髢｢騾｣縺吶ｋ繧｢繝ｩ繝ｼ繝医Ν繝ｼ繝ｫ繧定ｩ穂ｾ｡・医Μ繧｢繝ｫ繧ｿ繧､繝・磯・蠎ｦ・峨・縺ｿ・・      const assetRules = this.getAssetRules(asset.id);
+      
+      for (const rule of assetRules) {
+        if (!rule.isActive) continue;
+        
+        // 繝ｪ繧｢繝ｫ繧ｿ繧､繝・磯・蠎ｦ・峨・繝ｫ繝ｼ繝ｫ縺ｮ縺ｿ隧穂ｾ｡
+        if (rule.checkInterval === 0) {
+          console.log(`Evaluating real-time rule ${rule.id} (${rule.name}) on MQTT message`);
+          const alert = await this.evaluateRule(rule, asset, data, timestamp);
+          if (alert) {
+            newAlerts.push(alert);
+          }
+
+        }
+
+          console.log(`Skipping periodic rule ${rule.id} (${rule.name}) on MQTT message`);
+        }
+
+      }
+
+
+    }
+
+      console.error('Error evaluating message:', error);
+    }
+
+
+    return newAlerts;
+  }
+
+
+  // 繧｢繝ｩ繝ｼ繝医Ν繝ｼ繝ｫ繧定ｩ穂ｾ｡
+  private async evaluateRule(rule: AlertRule, asset: Asset, data: any, timestamp: Date): Promise<Alert | null> {
+    try {
+      // 譛邨ょｮ溯｡梧律譎ゅｒ譖ｴ譁ｰ
+      this.lastExecutionTimes.set(rule.id, timestamp);
+      
+      // 譚｡莉ｶ繧定ｩ穂ｾ｡・磯撼蜷梧悄縺ｧZ繧ｹ繧ｳ繧｢譚｡莉ｶ繧りｩ穂ｾ｡・・      let conditionsMet = true;
+      let zscoreDetails: any = null;
+      let notebookPath: string | undefined;
+      let notebookUrl: string | undefined;
+
+      for (const condition of rule.conditions || []) {
+        const conditionResult = await this.evaluateCondition(condition, data, asset.id);
+        
+        // Z繧ｹ繧ｳ繧｢譚｡莉ｶ縺ｮ蝣ｴ蜷医∬ｩｳ邏ｰ諠・ｱ繧剃ｿ晏ｭ・        if (condition.type === 'zscore' && conditionResult) {
+          zscoreDetails = await this.getZScoreDetails(condition, asset.id);
+        }
+
+        
+        // Notebook譚｡莉ｶ縺ｮ蝣ｴ蜷医∝ｮ溯｡後ヱ繧ｹ縺ｨURL繧剃ｿ晏ｭ・        if (condition.type === 'notebook' && conditionResult) {
+          notebookPath = condition.notebookConfig?.notebook;
+          if (notebookPath) {
+            // Notebook繧帝幕縺上◆繧√・URL繧堤函謌・            notebookUrl = `https://glicocmms-cbm-notebooks.org/notebooks/${notebookPath}`;
+          }
+
+        }
+
+        
+        if (!conditionResult) {
+          conditionsMet = false;
+          break;
+        }
+
+      }
+
+
+      if (!conditionsMet) {
+        // 譚｡莉ｶ縺梧ｺ縺溘＆繧後※縺・↑縺・ｴ蜷医∵里蟄倥・繧｢繝ｩ繝ｼ繝医ｒ隗｣豎ｺ
+        this.resolveAlert(rule.id, asset.id);
+        return null;
+      }
+
+
+      // 譌｢蟄倥・繧｢繝ｩ繝ｼ繝医′縺ゅｋ縺九メ繧ｧ繝・け
+      const alertKey = `${rule.id}_${asset.id}`;
+      const existingAlert = this.activeAlerts.get(alertKey);
+
+      if (existingAlert) {
+        // 譌｢蟄倥・繧｢繝ｩ繝ｼ繝医ｒ譖ｴ譁ｰ
+        existingAlert.timestamp = timestamp.toISOString();
+        existingAlert.value = this.extractValue(rule.conditions?.[0]?.parameter, data);
+        existingAlert.threshold = rule.conditions?.[0]?.value;
+        if (zscoreDetails) {
+          existingAlert.zscore = zscoreDetails.zscore;
+          existingAlert.zscoreDetails = {
+            currentValue: zscoreDetails.currentValue,
+            populationMean: zscoreDetails.populationMean,
+            populationStdDev: zscoreDetails.populationStdDev,
+            threshold: zscoreDetails.threshold
+          }
+
+        }
+
+        // Notebook諠・ｱ繧呈峩譁ｰ
+        if (notebookPath) {
+          existingAlert.notebookPath = notebookPath;
+          existingAlert.notebookUrl = notebookUrl;
+        }
+
+        return existingAlert;
+      }
+
+
+      // 譁ｰ縺励＞繧｢繝ｩ繝ｼ繝医ｒ菴懈・
+      const alert: Alert = {
+        id: this.generateAlertId(),
+        assetId: asset.id,
+        assetName: asset.name,
+        ruleId: rule.id,
+        ruleName: rule.name,
+        severity: 'warning', // 繝・ヵ繧ｩ繝ｫ繝亥､
+        message: this.generateAlertMessage(rule, asset, data),
+        timestamp: timestamp.toISOString(),
+        isActive: true,
+        value: this.extractValue(rule.conditions?.[0]?.parameter, data),
+        threshold: rule.conditions?.[0]?.value,
+        notebookPath: notebookPath,
+        notebookUrl: notebookUrl
+      }
+
+
+      // 繧｢繧ｯ繝・ぅ繝悶い繝ｩ繝ｼ繝医↓霑ｽ蜉
+      this.activeAlerts.set(alertKey, alert);
+
+      // 繧｢繧ｻ繝・ヨ縺ｮ繧｢繝ｩ繝ｼ繝育憾諷九ｒ譖ｴ譁ｰ
+      this.updateAssetAlertStatus(asset, rule, alert);
+
+      return alert;
+
+    }
+
+      console.error('Error evaluating rule:', error);
+      return null;
+    }
+
+
+  // 譚｡莉ｶ繧定ｩ穂ｾ｡
+  private async evaluateCondition(condition: AlertCondition, data: any, assetId?: string): Promise<boolean> {
+    // Notebook譚｡莉ｶ縺ｮ蝣ｴ蜷・    if (condition.type === 'notebook' && condition.notebookConfig) {
+      const result = await evaluateNotebookCondition(condition, data);
+
+      // Notebook縺ｮ螳溯｡梧ュ蝣ｱ繧剃ｿ晏ｭ假ｼ医い繝ｩ繝ｼ繝磯撼逋ｺ轣ｫ譎ゅｂ・・      if (assetId) {
+        const asset = this.assets.find(a => a.id === assetId);
+        if (asset) {
+          const notebookPath = condition.notebookConfig.notebook;
+          if (notebookPath) {
+            asset.lastNotebookPath = notebookPath;
+            asset.lastNotebookUrl = `https://glicocmms-cbm-notebooks.org/notebooks/${notebookPath}`;
+            asset.lastNotebookExecutedAt = new Date();
+          }
+
+        }
+
+      }
+
+
+      return result;
+    }
+
+
+    // Z繧ｹ繧ｳ繧｢譚｡莉ｶ縺ｮ蝣ｴ蜷・    if (condition.type === 'zscore' && condition.zscoreConfig && assetId) {
+      return await this.evaluateZScoreCondition(condition, assetId);
+    }
+
+
+    // 騾壼ｸｸ縺ｮ譚｡莉ｶ縺ｮ蝣ｴ蜷・    const fieldValue = this.extractValue(condition.parameter, data);
+    
+    if (fieldValue === null || fieldValue === undefined) {
+      return false;
+    }
+
+
+    const conditionValue = condition.value;
+    const fieldValueNum = typeof fieldValue === 'string' ? parseFloat(fieldValue) : fieldValue;
+    const conditionValueNum = typeof conditionValue === 'string' ? parseFloat(conditionValue) : conditionValue;
+
+    switch (condition.operator) {
+      case '>':
+        return fieldValueNum > conditionValueNum;
+      case '<':
+        return fieldValueNum < conditionValueNum;
+      case '=':
+        return fieldValueNum === conditionValueNum;
+      case '>=':
+        return fieldValueNum >= conditionValueNum;
+      case '<=':
+        return fieldValueNum <= conditionValueNum;
+      case '!=':
+        return fieldValueNum !== conditionValueNum;
+      default:
+        return false;
+    }
+
+
+  // Z繧ｹ繧ｳ繧｢譚｡莉ｶ繧定ｩ穂ｾ｡
+  private async evaluateZScoreCondition(condition: AlertCondition, assetId: string): Promise<boolean> {
+    try {
+      // InfluxDB縺九ｉ繝・・繧ｿ繧貞叙蠕・      const response = await fetch(`/api/influxdb/asset-data/${assetId}?field=${condition.parameter}&hours=${condition.zscoreConfig!.populationWindow * 24}`);
+      
+      if (!response.ok) {
+        console.error('Failed to fetch asset data for Z-score calculation');
+        return false;
+      }
+
+
+      const result = await response.json();
+      if (!result.success || !result.data || result.data.length === 0) {
+        console.log('No data available for Z-score calculation');
+        return false;
+      }
+
+
+      // Z繧ｹ繧ｳ繧｢繧定ｨ育ｮ・      const zscoreResult = ZScoreCalculator.calculateZScore(result.data, condition.zscoreConfig!);
+      
+      if (!zscoreResult) {
+        console.log('Z-score calculation failed');
+        return false;
+      }
+
+
+      console.log('Z-score calculation result:', zscoreResult);
+      return zscoreResult.isAnomaly;
+    }
+
+      console.error('Error evaluating Z-score condition:', error);
+      return false;
+    }
+
+
+  // Z繧ｹ繧ｳ繧｢隧ｳ邏ｰ諠・ｱ繧貞叙蠕・  private async getZScoreDetails(condition: AlertCondition, assetId: string): Promise<any> {
+    try {
+      const response = await fetch(`/api/influxdb/asset-data/${assetId}?field=${condition.parameter}&hours=${condition.zscoreConfig!.populationWindow * 24}`);
+      
+      if (!response.ok) {
+        return null;
+      }
+
+
+      const result = await response.json();
+      if (!result.success || !result.data || result.data.length === 0) {
+        return null;
+      }
+
+
+      return ZScoreCalculator.calculateZScore(result.data, condition.zscoreConfig!);
+    }
+
+      console.error('Error getting Z-score details:', error);
+      return null;
+    }
+
+
+  // 繝｡繝・そ繝ｼ繧ｸ縺九ｉ蛟､繧呈歓蜃ｺ
+  private extractValue(field: string, data: any): any {
+    if (!field) return null;
+
+    // 繝阪せ繝医＠縺溘ヵ繧｣繝ｼ繝ｫ繝峨↓蟇ｾ蠢懶ｼ井ｾ・ "sensor.temperature"・・    const fieldParts = field.split('.');
+    let value = data;
+
+    for (const part of fieldParts) {
+      if (value && typeof value === 'object' && part in value) {
+        value = value[part];
+      }
+
+        return null;
+      }
+
+    }
+
+
+  // MQTT繝｡繝・そ繝ｼ繧ｸ繧偵ヱ繝ｼ繧ｹ
+  private parseMessage(message: string): any {
+    try {
+      return JSON.parse(message);
+    }
+
+      // JSON縺ｧ縺ｪ縺・ｴ蜷医・縲∝腰邏斐↑蛟､縺ｨ縺励※謇ｱ縺・      const numValue = parseFloat(message);
+      return isNaN(numValue) ? { value: message } : { value: numValue };
+    }
+
+
+  // トピックからアセットを検索
+  private findAssetByTopic(topic: string): Asset | null {
+    return this.assets.find(asset => asset.mqttTopic === topic) || null;
+  }
+  }
+
+    if (asset) {
+      asset.status = status;
+      asset.lastUpdate = timestamp;
+      console.log(`Asset ${asset.name} (${assetId}) status updated to: ${status}`);
+    }
+
+
+  // 繧｢繧ｻ繝・ヨ縺ｮ繝ｫ繝ｼ繝ｫ繧貞叙蠕・  private getAssetRules(assetId: string): AlertRule[] {
+    return Array.from(this.alertRules.values()).filter(rule => 
+      rule.assetId === assetId
+    );
+  }
+
+
+  // 繧｢繝ｩ繝ｼ繝医Γ繝・そ繝ｼ繧ｸ繧堤函謌・  private generateAlertMessage(rule: AlertRule, asset: Asset, data: any): string {
+    const condition = rule.conditions?.[0];
+    if (!condition) return `${asset.name}: 繧｢繝ｩ繝ｼ繝域擅莉ｶ縺梧ｺ縺溘＆繧後∪縺励◆`;
+
+    const value = this.extractValue(condition.parameter, data);
+    const operatorText = this.getOperatorText(condition.operator);
+    
+    return `${asset.name}: ${condition.parameter}縺・{operatorText}${condition.value} (迴ｾ蝨ｨ蛟､: ${value})`;
+  }
+
+
+  // 貍皮ｮ怜ｭ舌ｒ繝・く繧ｹ繝医↓螟画鋤
+  private getOperatorText(operator: string): string {
+    switch (operator) {
+      case '>': return '雜・℃: ';
+      case '<': return '譛ｪ貅: ';
+      case '=': return '遲峨＠縺・ ';
+      case '>=': return '莉･荳・ ';
+      case '<=': return '莉･荳・ ';
+      case '!=': return '遲峨＠縺上↑縺・ ';
+      default: return '';
+    }
+
+
+  // 繧｢繝ｩ繝ｼ繝医ｒ隗｣豎ｺ
+  private resolveAlert(ruleId: string, assetId: string) {
+    const alertKey = `${ruleId}_${assetId}`;
+    const alert = this.activeAlerts.get(alertKey);
+    
+    if (alert) {
+      alert.isActive = false;
+      
+      // 繧｢繧ｻ繝・ヨ縺ｮ繧｢繝ｩ繝ｼ繝育憾諷九ｒ繧ｯ繝ｪ繧｢
+      this.clearAssetAlertStatus(assetId);
+      
+      // 荳螳壽凾髢灘ｾ後↓繧｢繝ｩ繝ｼ繝医ｒ蜑企勁
+      setTimeout(() => {
+        this.activeAlerts.delete(alertKey);
+      }
+
+    }
+
+
+  // 繧｢繝ｩ繝ｼ繝医ち繧､繝繧｢繧ｦ繝医ｒ繝√ぉ繝・け
+  private checkAlertTimeouts() {
+    const now = new Date();
+    const timeoutThreshold = 30 * 60 * 1000; // 30蛻・
+    for (const [key, alert] of this.activeAlerts.entries()) {
+      const alertTime = new Date(alert.timestamp);
+      if (now.getTime() - alertTime.getTime() > timeoutThreshold) {
+        this.activeAlerts.delete(key);
+      }
+
+    }
+
+
+  // 繧｢繝ｩ繝ｼ繝・D繧堤函謌・  private generateAlertId(): string {
+    return `alert_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+
+  // 繧｢繧ｯ繝・ぅ繝悶↑繧｢繝ｩ繝ｼ繝医ｒ蜿門ｾ・  getActiveAlerts(): Alert[] {
+  // アクティブなアラートを取得
+  getActiveAlerts(): Alert[] {
+    return Array.from(this.activeAlerts.values()).filter(alert => alert.isActive);
+  }
+
+  // ルールの最終実行日時を取得
+    return this.lastExecutionTimes.get(ruleId) || null;
+  }
+
+  // アセットのアラートを取得
+  getAssetAlerts(assetId: string): Alert[] {
+    return this.getActiveAlerts().filter(alert => alert.assetId === assetId);
+  }
+  // アラートを手動で解決
+  resolveAlertById(alertId: string) {
+    const alert = Array.from(this.activeAlerts.values()).find(a => a.id === alertId);
+    if (alert) {
+      this.resolveAlert(alert.ruleId, alert.assetId);
+    }
+
+
+  // 繝ｫ繝ｼ繝ｫ縺ｮ螳壽悄螳溯｡後ｒ髢句ｧ・  private startRuleInterval(rule: AlertRule) {
+    // 譌｢蟄倥・繧ｿ繧､繝槭・縺後≠繧後・繧ｯ繝ｪ繧｢
+    this.clearRuleInterval(rule.id);
+    
+    // 繝ｪ繧｢繝ｫ繧ｿ繧､繝・磯・蠎ｦ・峨・繝ｫ繝ｼ繝ｫ縺ｯ螳壽悄螳溯｡後＠縺ｪ縺・    if (rule.checkInterval === 0) {
+      console.log(`Skipping periodic execution for real-time rule ${rule.id} (${rule.name})`);
+      return;
+    }
+
+    
+    const interval = rule.checkInterval || 0; // 繝・ヵ繧ｩ繝ｫ繝医Μ繧｢繝ｫ繧ｿ繧､繝・磯・蠎ｦ・・    console.log(`Starting periodic execution for rule ${rule.id} (${rule.name}) with interval ${interval}s`);
+    
+    const timer = setInterval(async () => {
+      await this.executeRulePeriodically(rule);
+    }
+
+    
+    this.ruleIntervals.set(rule.id, timer);
+  }
+
+
+  // 繝ｫ繝ｼ繝ｫ縺ｮ螳壽悄螳溯｡後ｒ蛛懈ｭ｢
+  private clearRuleInterval(ruleId: string) {
+    const timer = this.ruleIntervals.get(ruleId);
+    if (timer) {
+      clearInterval(timer);
+      this.ruleIntervals.delete(ruleId);
+      console.log(`Stopped periodic execution for rule ${ruleId}`);
+    }
+
+
+  // 縺吶∋縺ｦ縺ｮ繝ｫ繝ｼ繝ｫ繧ｿ繧､繝槭・繧偵け繝ｪ繧｢
+  private clearAllRuleIntervals() {
+    this.ruleIntervals.forEach((timer, ruleId) => {
+      clearInterval(timer);
+      console.log(`Cleared interval for rule ${ruleId}`);
+    }
+
+    this.ruleIntervals.clear();
+  }
+
+
+  // 繝ｫ繝ｼ繝ｫ繧貞ｮ壽悄螳溯｡・  private async executeRulePeriodically(rule: AlertRule) {
+    try {
+      console.log(`Executing rule ${rule.id} (${rule.name}) periodically`);
+      
+      // 繝ｫ繝ｼ繝ｫ縺ｫ髢｢騾｣縺吶ｋ繧｢繧ｻ繝・ヨ繧貞叙蠕・      const asset = this.assets.find(a => a.id === rule.assetId);
+      if (!asset) {
+        console.log(`Asset not found for rule ${rule.id}`);
+        return;
+      }
+
+
+      // 譛譁ｰ縺ｮ繝・・繧ｿ繧貞叙蠕暦ｼ・nfluxDB縺九ｉ・・      const latestData = await this.getLatestAssetData(asset.id);
+      if (!latestData) {
+        console.log(`No data available for asset ${asset.id}`);
+        return;
+      }
+
+
+      // 繝ｫ繝ｼ繝ｫ繧定ｩ穂ｾ｡
+      const alert = await this.evaluateRule(rule, asset, latestData, new Date());
+      if (alert) {
+        console.log(`Alert triggered by periodic execution: ${alert.message}`);
+        // 繧｢繝ｩ繝ｼ繝医′逋ｺ逕溘＠縺溷ｴ蜷医・蜃ｦ逅・ｼ亥ｿ・ｦ√↓蠢懊§縺ｦ騾夂衍縺ｪ縺ｩ・・      }
+
+    }
+
+      console.error(`Error executing rule ${rule.id} periodically:`, error);
+    }
+
+
+  // 繧｢繧ｻ繝・ヨ縺ｮ譛譁ｰ繝・・繧ｿ繧貞叙蠕・  private async getLatestAssetData(assetId: string): Promise<any> {
+    try {
+      const response = await fetch(`/api/influxdb/asset-data/${assetId}?field=value&hours=1&limit=1`);
+      if (!response.ok) {
+        return null;
+      }
+
+      
+      const result = await response.json();
+      if (result.success && result.data && result.data.length > 0) {
+        return { value: result.data[0].value };
+      }
+
+      return null;
+    }
+
+      console.error('Error fetching latest asset data:', error);
+      return null;
+    }
+
+
+  // 繝ｫ繝ｼ繝ｫ縺ｮ迥ｶ諷九ｒ譖ｴ譁ｰ・医い繧ｯ繝・ぅ繝・髱槭い繧ｯ繝・ぅ繝厄ｼ・  updateRuleStatus(ruleId: string, isActive: boolean) {
+    const rule = this.alertRules.get(ruleId);
+    if (rule) {
+      rule.isActive = isActive;
+      
+      if (isActive) {
+        this.startRuleInterval(rule);
+      }
+
+        this.clearRuleInterval(ruleId);
+      }
+
+    }
+
+
+  // 繝ｫ繝ｼ繝ｫ繧呈峩譁ｰ
+  updateRule(rule: AlertRule) {
+    this.alertRules.set(rule.id, rule);
+    
+    // 譌｢蟄倥・繧ｿ繧､繝槭・繧偵け繝ｪ繧｢
+    this.clearRuleInterval(rule.id);
+    
+    // 繧｢繧ｯ繝・ぅ繝悶↑蝣ｴ蜷医・譁ｰ縺励＞繧ｿ繧､繝槭・繧帝幕蟋・    if (rule.isActive) {
+      this.startRuleInterval(rule);
+    }
+
+
+  // 繧｢繧ｻ繝・ヨ縺ｮ繧｢繝ｩ繝ｼ繝育憾諷九ｒ譖ｴ譁ｰ
+  private updateAssetAlertStatus(asset: Asset, rule: AlertRule, alert: Alert) {
+    // 繧｢繧ｻ繝・ヨ縺ｮ繧｢繝ｩ繝ｼ繝育憾諷九ｒ譖ｴ譁ｰ
+    asset.isAlertActive = true;
+    asset.activeAlertRule = rule.id;
+    asset.alertTriggeredAt = new Date();
+    
+    // Notebook諠・ｱ繧定ｨｭ螳・    if (alert.notebookPath) {
+      asset.activeAlertNotebookPath = alert.notebookPath;
+      asset.activeAlertNotebookUrl = alert.notebookUrl;
+    }
+
+    
+    console.log(`Asset ${asset.name} alert status updated:`, {
+      isAlertActive: asset.isAlertActive,
+      activeAlertRule: asset.activeAlertRule,
+      alertTriggeredAt: asset.alertTriggeredAt,
+      notebookPath: asset.activeAlertNotebookPath,
+      notebookUrl: asset.activeAlertNotebookUrl
+    }
+
+  }
+
+
+  // 繧｢繧ｻ繝・ヨ縺ｮ繧｢繝ｩ繝ｼ繝育憾諷九ｒ繧ｯ繝ｪ繧｢
+  clearAssetAlertStatus(assetId: string) {
+    const asset = this.assets.find(a => a.id === assetId);
+    if (asset) {
+      asset.isAlertActive = false;
+      asset.activeAlertRule = undefined;
+      asset.alertTriggeredAt = undefined;
+      asset.activeAlertNotebookPath = undefined;
+      asset.activeAlertNotebookUrl = undefined;
+      
+      console.log(`Asset ${asset.name} alert status cleared`);
+    }
+
+}
+
+// 繧ｷ繝ｳ繧ｰ繝ｫ繝医Φ繧､繝ｳ繧ｹ繧ｿ繝ｳ繧ｹ
+export const alertEvaluator = new AlertEvaluator();
+
+
+
+
+
+
+
+
+

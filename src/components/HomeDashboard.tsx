@@ -1,0 +1,330 @@
+﻿import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  AlertTriangle, 
+  CheckCircle, 
+  Clock, 
+  Activity, 
+  Database, 
+  Wifi, 
+  TrendingUp, 
+  AlertCircle,
+  Bell,
+  Shield,
+  Zap,
+  Thermometer,
+  Gauge,
+  Settings,
+  ExternalLink
+} from 'lucide-react';
+import { alertEvaluator, Alert } from '../utils/alertEvaluator';
+import { Asset } from '../types';
+
+interface SystemStats {
+  totalAssets: number;
+  activeAlerts: number;
+  connectedAssets: number;
+  systemHealth: 'excellent' | 'good' | 'warning' | 'critical';
+}
+
+interface HomeDashboardProps {
+  mqttConnected: boolean;
+  databaseConnected: boolean;
+  influxdbConnected: boolean;
+  assets: Asset[];
+}
+
+export const HomeDashboard: React.FC<HomeDashboardProps> = ({
+  mqttConnected,
+  databaseConnected,
+  influxdbConnected,
+  assets
+}) => {
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [stats, setStats] = useState<SystemStats>({
+    totalAssets: 0,
+    activeAlerts: 0,
+    connectedAssets: 0,
+    systemHealth: 'good'
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 実際のアセットデータから統計を計算
+  const calculatedStats = useMemo(() => {
+    const totalAssets = assets.length;
+    const connectedAssets = assets.filter(asset => asset.status === 'online').length;
+    
+    return { totalAssets, connectedAssets };
+  }, [assets]);
+
+  // 実際のアラートデータを取得
+  useEffect(() => {
+    const loadAlerts = () => {
+      const activeAlerts = alertEvaluator.getActiveAlerts();
+      setAlerts(activeAlerts);
+      
+      const newStats: SystemStats = {
+        totalAssets: calculatedStats.totalAssets, // 実際のアセット数を使用
+        activeAlerts: activeAlerts.length,
+        connectedAssets: calculatedStats.connectedAssets, // 実際の接続アセット数を使用
+        systemHealth: activeAlerts.some(a => a.severity === 'critical') ? 'critical' : 
+                     activeAlerts.some(a => a.severity === 'warning') ? 'warning' : 'good'
+      };
+      
+      setStats(newStats);
+      setIsLoading(false);
+    };
+
+    // 初回読み込み
+    loadAlerts();
+
+    // 定期的にアラート状態を更新（5分ごと）
+    const interval = setInterval(loadAlerts, 300000);
+
+    return () => clearInterval(interval);
+  }, [calculatedStats]);
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'text-red-500 bg-red-500/10 border-red-500/20';
+      case 'warning': return 'text-yellow-500 bg-yellow-500/10 border-yellow-500/20';
+      case 'info': return 'text-blue-500 bg-blue-500/10 border-blue-500/20';
+      default: return 'text-gray-500 bg-gray-500/10 border-gray-500/20';
+    }
+  };
+
+  const getSeverityIcon = (severity: string) => {
+    switch (severity) {
+      case 'critical': return <AlertTriangle size={16} />;
+      case 'warning': return <AlertCircle size={16} />;
+      case 'info': return <Bell size={16} />;
+      default: return <Bell size={16} />;
+    }
+  };
+
+  const getSystemHealthColor = (health: string) => {
+    switch (health) {
+      case 'excellent': return 'text-green-500';
+      case 'good': return 'text-green-400';
+      case 'warning': return 'text-yellow-500';
+      case 'critical': return 'text-red-500';
+      default: return 'text-gray-400';
+    }
+  };
+
+  const getSystemHealthIcon = (health: string) => {
+    switch (health) {
+      case 'excellent':
+      case 'good': return <CheckCircle size={20} />;
+      case 'warning': return <AlertCircle size={20} />;
+      case 'critical': return <AlertTriangle size={20} />;
+      default: return <Settings size={20} />;
+    }
+  };
+
+  const formatTimeAgo = (timestamp: string) => {
+    const now = new Date();
+    const alertTime = new Date(timestamp);
+    const diffMs = now.getTime() - alertTime.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+
+    if (diffMins < 1) return '今';
+    if (diffMins < 60) return `${diffMins}分前`;
+    if (diffHours < 24) return `${diffHours}時間前`;
+    return `${Math.floor(diffHours / 24)}日前`;
+  };
+
+  const handleInfluxDBLogin = () => {
+    // 現在のホスト名とプロトコルを取得してInfluxDBのURLを構築
+    const currentHost = window.location.hostname;
+    const protocol = window.location.protocol;
+    
+    let influxdbUrl;
+    if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+      // ローカル環境: Explorer へ
+      influxdbUrl = 'http://localhost:8888';
+    } else {
+      // 本番環境: Explorer へ
+      influxdbUrl = `${protocol}//influx3.glicocmms-assets-manager.com/`;
+    }
+    
+    // 新しいタブでInfluxDBログイン画面を開く
+    window.open(influxdbUrl, '_blank');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-400">ダッシュボードを読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1 bg-gray-900 p-6 overflow-y-auto">
+      {/* ヘッダー */}
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">ダッシュボード</h1>
+          <p className="text-gray-400">システムの現在の状態とアラートの概要</p>
+        </div>
+        <button
+          onClick={handleInfluxDBLogin}
+          className="flex items-center space-x-2 px-3 py-2 text-sm text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+          title="InfluxDB3 Explorer"
+        >
+          <TrendingUp size={16} />
+          <span>Explorer</span>
+          <ExternalLink size={14} />
+        </button>
+      </div>
+
+      {/* システム状態カード */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {/* システムヘルス */}
+        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <div className={`${getSystemHealthColor(stats.systemHealth)}`}>
+              {getSystemHealthIcon(stats.systemHealth)}
+            </div>
+            <span className="text-sm text-gray-400">システムヘルス</span>
+          </div>
+          <div className="text-2xl font-bold text-white mb-1">
+            {stats.systemHealth === 'excellent' ? '優秀' :
+             stats.systemHealth === 'good' ? '良好' :
+             stats.systemHealth === 'warning' ? '注意' : '危険'}
+          </div>
+          <div className="text-sm text-gray-400">
+            {stats.activeAlerts}件のアクティブアラート
+          </div>
+        </div>
+
+        {/* 総アセット数 */}
+        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-blue-400">
+              <Activity size={20} />
+            </div>
+            <span className="text-sm text-gray-400">総アセット数</span>
+          </div>
+          <div className="text-2xl font-bold text-white mb-1">{stats.totalAssets}</div>
+          <div className="text-sm text-gray-400">
+            {stats.connectedAssets}件が接続中
+          </div>
+        </div>
+
+        {/* アクティブアラート */}
+        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <div className="text-red-400">
+              <AlertTriangle size={20} />
+            </div>
+            <span className="text-sm text-gray-400">アクティブアラート</span>
+          </div>
+          <div className="text-2xl font-bold text-white mb-1">{stats.activeAlerts}</div>
+          <div className="text-sm text-gray-400">
+            {alerts.filter(a => a.severity === 'critical').length}件が緊急
+          </div>
+        </div>
+
+        {/* 接続ステータス */}
+        <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+          <div className="flex items-center justify-between mb-4">
+            <div className={`${mqttConnected ? 'text-green-400' : 'text-red-400'}`}>
+              <Wifi size={20} />
+            </div>
+            <span className="text-sm text-gray-400">接続ステータス</span>
+          </div>
+          <div className="text-2xl font-bold text-white mb-1">
+            {mqttConnected ? '接続中' : '切断'}
+          </div>
+          <div className="text-sm text-gray-400">
+            MQTTデータベース
+          </div>
+        </div>
+      </div>
+
+      {/* アラート一覧 */}
+      <div className="bg-gray-800 rounded-lg border border-gray-700">
+        <div className="p-6 border-b border-gray-700">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-white">現在のアラート</h2>
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-400">5分ごとに更新</span>
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6">
+          {alerts.length === 0 ? (
+            <div className="text-center py-8">
+              <CheckCircle size={48} className="text-green-400 mx-auto mb-4" />
+              <p className="text-gray-400">現在アクティブなアラートはありません</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className={`p-4 rounded-lg border ${getSeverityColor(alert.severity)}`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start space-x-3 flex-1">
+                      <div className="mt-1">
+                        {getSeverityIcon(alert.severity)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-1">
+                          <h3 className="font-semibold text-white">{alert.assetName}</h3>
+                          <span className="text-xs px-2 py-1 bg-gray-700 rounded-full text-gray-300">
+                            アセット
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-300 mb-2">{alert.message}</p>
+                        <div className="flex items-center space-x-4 text-xs text-gray-400">
+                          <div className="flex items-center space-x-1">
+                            <Clock size={12} />
+                            <span>{formatTimeAgo(alert.timestamp)}</span>
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <AlertTriangle size={12} />
+                            <span>
+                              {alert.severity === 'critical' ? '緊急' :
+                               alert.severity === 'warning' ? '警告' : '情報'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                       <button className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors">
+                         詳細
+                       </button>
+                       <button 
+                         onClick={() => {
+                           alertEvaluator.resolveAlertById(alert.id);
+                           // アラートリストを更新
+                           const updatedAlerts = alertEvaluator.getActiveAlerts();
+                           setAlerts(updatedAlerts);
+                         }}
+                         className="text-xs px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded transition-colors"
+                       >
+                         解決
+                       </button>
+                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
